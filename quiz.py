@@ -186,14 +186,13 @@ def quiz_game(participant_id, level, used_ids=None):
     passing_score = (num_questions + 1) // 2  # half, rounded up
     if score < passing_score:
         print(f"Sorry, you needed at least score {passing_score} to pass Level {level}. You failed. Please retry.")
-        main_menu()
         return
 
     next_action = input("Do you want to proceed to the next level or return to the main menu? (next/main): ").strip().lower()
     if next_action == 'next':
         quiz_game(participant_id, level + 1, used_ids)
     else:
-        main_menu()
+        return
 
 def display_scores():
     scores = get_scores()
@@ -269,6 +268,8 @@ def player_menu():
                     continue_game = input("Do you want to continue or restart? (continue/restart): ").strip().lower()
                     if continue_game == 'restart':
                         level = 1
+                    else:
+                        print(f"Continuing from Level {level}.")
                     quiz_game(participant_id, level)
                 else:
                     print("Participant not found.")
@@ -286,12 +287,38 @@ def player_menu():
 def get_participant_info(name):
     conn = connect_to_database()
     cursor = conn.cursor()
-    cursor.execute("SELECT p.id, MAX(s.level) FROM participants p LEFT JOIN scores s ON p.id = s.participant_id WHERE p.name = %s GROUP BY p.id", (name,))
+    # Get participant id
+    cursor.execute("SELECT id FROM participants WHERE name = %s", (name,))
+    participant = cursor.fetchone()
+    if not participant:
+        conn.close()
+        return None, None
+    participant_id = participant[0]
+
+    # Get the highest level played by this participant
+    cursor.execute("""
+        SELECT MAX(level) FROM scores WHERE participant_id = %s
+    """, (participant_id,))
     result = cursor.fetchone()
+    highest_level = result[0] if result and result[0] is not None else 1
+
+    # Get the score for the highest level
+    cursor.execute("""
+        SELECT score FROM scores WHERE participant_id = %s AND level = %s
+    """, (participant_id, highest_level))
+    score_result = cursor.fetchone()
+    last_score = score_result[0] if score_result else None
+
     conn.close()
-    if result:
-        return result[0], result[1] if result[1] else 1
-    return None, None
+
+    # Calculate passing score for that level
+    num_questions = 3 + (highest_level - 1) * 2
+    passing_score = (num_questions + 1) // 2
+    # If last score is not None and passed, start from next level
+    if last_score is not None and last_score >= passing_score:
+        return participant_id, highest_level + 1
+    else:
+        return participant_id, highest_level if highest_level else 1
 
 if __name__ == "__main__":
     main_menu()
